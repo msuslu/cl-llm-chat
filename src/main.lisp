@@ -1,14 +1,20 @@
 (defpackage llm-chat
   (:use #:cl)
-  (:export #:llm-chat #:anyscale-completion #:get-completion
-		   #:deftool))
+  (:export #:llm-chat
+		   #:anyscale-completion
+		   #:llamafile-completion
+		   #:get-completion
+		   #:deftool
+		   *timeout*))
 
 (in-package #:llm-chat)
 
 (defvar *tools* (make-hash-table :test 'equalp))
+(defvar *timeout* 60)
 
 (defclass llm-chat ()
-  ()
+  ((system-prompt :initform "You are a helpful assistant." :initarg :system-prompt)
+   (msgs :initform nil ))
   (:documentation "Base class for completions"))
 
 (defclass anyscale-completion (llm-chat)
@@ -16,9 +22,13 @@
    (api-key :initarg :api-key)
    (model :initform "meta-llama/Meta-Llama-3-8B-Instruct" :initarg :model)
    (tools :initarg :tools :initform nil)
-   (parameters :initarg :parameters :initform nil)
-   (msgs :initform (list '(("role" . "system") ("content" . "You are a helpful assistant")))))
+   (parameters :initarg :parameters :initform nil))
   (:documentation "Anyscale completion"))
+
+(defmethod initialize-instance :after ((obj llm-chat) &key)
+  (with-slots (msgs system-prompt) obj
+    (setf msgs
+          (list `(("role" . "system") ("content" . ,system-prompt))))))
 
 (defclass function-tool ()
   ((name :initarg :name)
@@ -42,6 +52,8 @@
 										 ("required" . ,(loop for p in parameters
 															 collect (first p)))))))))))
 
+;; This function excerpted with minor changes from
+;; https://github.com/atgreen/cl-completions/blob/76fd9feead874afbf7d1f5535029e178275c4c66/completions.lisp#L81
 (defmacro deftool (name args description &rest body)
   (unless (listp args)
 	(error "ARGS must be a list."))
@@ -67,6 +79,7 @@
 (defmethod get-completion ((completer anyscale-completion) prompt)
   (with-slots (endpoint api-key model msgs tools parameters) completer
 	(let ((resp (dex:post endpoint
+						  :read-timeout *timeout*
 						  :headers `((:authorization . ,(format nil "Bearer ~a" api-key))
 									 (:content-type . "application/json"))
 						  :content (json:encode-json-alist-to-string
@@ -121,9 +134,8 @@
 
 
 
-;; (defparameter *completer* (make-instance 'anyscale-completion
-;; 										 :model "mistralai/Mistral-7B-Instruct-v0.1"
-;; 										 :api-key *token*
-;; 										 :tools '(get-temp)))
-
-;; (get-completion *completer* "What is the weather in San Francisco?")
+(defclass llamafile-completion (anyscale-completion)
+  ((endpoint  :initform "http://127.0.0.1:8080/v1/chat/completions")
+   (model :initform "LLaMA_CPP" :initarg :model)
+   (api-key :initform "no-key"))
+  (:documentation "llamafile completion"))
